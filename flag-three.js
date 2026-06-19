@@ -17,12 +17,12 @@
   var RES_X = 54, RES_Y = 30;            // particles across × down (more polygons → smoother folds)
   var CW = 260, CH = 260 / 1.9;          // cloth size in physics units
   var MASS = 0.1, DRAG = 0.94;           // more damping → settles instead of floating
-  var GRAV = 40;                         // gravity → the flag hangs from its pinned top edge
+  var GRAV = 30;                         // gravity → slight droop of the free (right) edge
   var DT = 0.018, DT2 = DT * DT;
   var ITER = 5;                          // constraint relaxation passes
   var REST_X = CW / (RES_X - 1), REST_Y = CH / (RES_Y - 1);
   var MAXSTEP = REST_X * 1.2;            // per-step clamp → keeps the sim from exploding
-  var A3_SIZE = 1.5, A3_TOP_OFFSET = 0.25, A3_SHIFT_PX = 110, PIN_DRIFT = 18;   // 50% larger, shifted up 110px; PIN_DRIFT = right-side pin wander
+  var A3_SIZE = 1.5, A3_TOP_OFFSET = 0.25, A3_SHIFT_PX = 110, PIN_DRIFT = 18;   // A3-only: 50% larger, shifted up 110px; PIN_DRIFT = right-side pin wander
   var P = [], CONS = [];                 // particles + distance constraints
   var mouse3, mouseR = CH * 0.30, MOUSE_PUSH = 2.2, mouseActive = false, lastMoveMs = -1e9;
   var tmp, diff, posArr, normArr;
@@ -49,7 +49,7 @@
         var x = -CW / 2 + (i / (RES_X - 1)) * CW;
         var y = CH / 2 - (j / (RES_Y - 1)) * CH;       // j=0 → top (matches PlaneGeometry + texture)
         P.push({ pos: new THREE.Vector3(x, y, 0), prev: new THREE.Vector3(x, y, 0),
-                 pinned: j === 0, rx: x, ry: y });     // pin the TOP edge — the flag hangs from it
+                 pinned: i === 0, rx: x, ry: y });     // pin the LEFT edge (hoist, stars side) — right side waves
       }
     }
     for (var jj = 0; jj < RES_Y; jj++) {
@@ -69,13 +69,12 @@
     for (var k = 0; k < P.length; k++) {
       var p = P[k]; if (p.pinned) continue;
       var i = k % RES_X, j = (k / RES_X) | 0;
-      var jn = j / (RES_Y - 1);                                   // 0 at the pinned top edge → 1 at the free bottom
-      var edge = 0.12 + jn;                                       // motion grows toward the free (bottom) edge
-      var ph = jn * Math.PI * 2 * wv - t * sp * 2.6 + i * 0.18;   // wave travels down the hanging flag
-      var swingPh = jn * Math.PI * 1.1 - t * sp * 1.0;            // slow overall swing
-      var fx = windPow * 0.45 * Math.sin(swingPh) * edge;         // gentle side-to-side
-      var fy = -GRAV + windPow * 0.14 * Math.cos(ph * 1.2) * edge;
-      var fz = windPow * 0.85 * Math.sin(ph) * edge;              // billow / travelling wave out of plane
+      var u = i / (RES_X - 1);                                    // 0 at the pinned left edge (hoist) → 1 at the free right edge
+      var edge = 0.12 + u;                                        // motion grows toward the free (right) edge
+      var ph = u * Math.PI * 2 * wv - t * sp * 2.6 + j * 0.22;    // wave travels left → right
+      var fx = windPow * (0.55 + 0.15 * Math.sin(ph * 0.6)) * edge;  // steady rightward stream → opens the flag out
+      var fy = -GRAV + windPow * 0.18 * Math.cos(ph * 1.3) * edge;   // gravity droop + flutter
+      var fz = windPow * 0.85 * Math.sin(ph) * edge;                // billow / travelling wave out of plane
       // verlet integrate
       var ax = fx * DT2 / MASS, ay = fy * DT2 / MASS, az = fz * DT2 / MASS;
       var nx = p.pos.x + (p.pos.x - p.prev.x) * DRAG + ax;
@@ -109,14 +108,8 @@
         if (md2 < R2) { var fall = 1 - md2 / R2; pp.pos.z -= MOUSE_PUSH * fall * fall; }   // soft press → ripples, not a warp
       }
     }
-    // hold the pinned top edge, but let the RIGHT side wander (irregular speed; no extra physics)
-    var tw = t + 3.2 * Math.sin(t * 0.09) + 1.8 * Math.sin(t * 0.19 + 1.1);   // time-warp → sometimes faster, sometimes slower
-    for (var q = 0; q < P.length; q++) if (P[q].pinned) {
-      var pi = q % RES_X, w = pi / (RES_X - 1);          // 0 = left (stays) → 1 = right (wanders most)
-      var dz = PIN_DRIFT * w * (Math.sin(tw * 0.48) + 0.6 * Math.sin(tw * 0.26 + 1.7) + 0.4 * Math.sin(tw * 0.13 + 3.1));
-      var dy = PIN_DRIFT * 0.5 * w * (Math.sin(tw * 0.36 + 2.0) + 0.5 * Math.sin(tw * 0.09 + 0.6));
-      P[q].pos.set(P[q].rx, P[q].ry + dy, dz);
-    }
+    // hold the pinned left (hoist) edge fixed — the two left corners stay put; the right side waves
+    for (var q = 0; q < P.length; q++) if (P[q].pinned) P[q].pos.set(P[q].rx, P[q].ry, 0);
   }
 
   function buildTexture(THREE) {
@@ -166,7 +159,7 @@
     var halfW = (CW / 2) * ct + (CH / 2) * st;               // rotated bounding box
     var halfH = (CW / 2) * st + (CH / 2) * ct;
     var dist = Math.max(halfH / (tan * fill), halfW / (tan * aspect * fill));
-    var cy = -A3_TOP_OFFSET * (tan * dist);                  // shift the flag UP in the box
+    var cy = -A3_TOP_OFFSET * (tan * dist);                 // shift the flag UP in the box
     camera.position.set(0, cy, dist);
     camera.aspect = aspect; camera.lookAt(0, cy, 0); camera.updateProjectionMatrix();
     lastTilt = opts.tilt;
